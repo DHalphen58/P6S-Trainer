@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rubik's Clock p6s Scrambler</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
+    --text:#e8eaed; --dim:#9aa0ab; --accent:#5b8cff; --accent2:#ff9d4d; --good:#4caf7d;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); padding:24px;}
+  h1{font-size:20px; margin:0 0 4px;}
+  .sub{color:var(--dim); font-size:13px; margin-bottom:20px;}
+  .layout{display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; flex:1 1 320px; min-width:300px;}
+  .case-table{width:100%; border-collapse:separate; border-spacing:6px;}
+  .case-table th{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--accent2); font-weight:700; text-align:left; padding:2px 6px 6px;}
+  .case-cell{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px; vertical-align:top;}
+  .case-cell:hover{border-color:var(--accent);}
+  .case-cell.empty{background:transparent; border:none;}
+  .case-cell .row{display:flex; align-items:flex-start; gap:7px;}
+  .case-cell input{margin-top:3px;}
+  .case-cell .lbl{font-size:12.5px; cursor:pointer;}
+  .case-cell .lbl .name{font-weight:600; display:block;}
+  .case-cell .lbl .desc{display:block; color:var(--dim); font-size:11px; margin-top:2px; line-height:1.4;}
+  .select-all-row{display:flex; gap:10px; margin-bottom:8px;}
+  .select-all-row button{width:auto; font-size:11px; padding:5px 9px; background:var(--panel2); border:1px solid var(--border); color:var(--dim); font-weight:500;}
+  button{font-size:14px; padding:9px 12px; border-radius:8px; border:none; background:var(--accent); color:var(--text); font-weight:600; cursor:pointer; width:100%;}
+  button:hover{filter:brightness(1.08);}
+  button.secondary{background:var(--panel2); border:1px solid var(--border); color:var(--text); font-weight:500;}
+  .footer-row{display:flex; gap:10px; margin-top:10px;}
+  .scramble-box{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:14px; font-family:"SF Mono",Menlo,Consolas,monospace; font-size:14px; line-height:1.7; word-break:break-all; margin-top:14px; min-height:48px;}
+  .scramble-box .tag{color:var(--accent2); font-weight:600; margin-right:2px;}
+  .meta-tag{font-size:11px; color:var(--dim); margin-top:8px;}
+  .draw-wrap{display:flex; gap:28px; justify-content:center; flex-wrap:wrap; margin-top:6px;}
+  .face{text-align:center;}
+  .face h3{font-size:13px; color:var(--dim); font-weight:600; margin:0 0 8px; text-transform:uppercase; letter-spacing:.04em;}
+  .grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:6px; width:198px; margin:0 auto;}
+  .dial-cell{display:flex; flex-direction:column; align-items:center; gap:3px;}
+  .dial-label{font-size:10px; color:var(--dim);}
+  svg.dial{width:56px; height:56px;}
+  .answer-box{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:14px; margin-top:14px; font-family:"SF Mono",Menlo,Consolas,monospace; font-size:13px; line-height:1.9; display:none;}
+  .answer-box.show{display:block;}
+  .answer-box .caseline{color:var(--good); font-weight:600; margin-bottom:6px; font-family:-apple-system,sans-serif;}
+  .note{font-size:12px; color:var(--dim); margin-top:16px; line-height:1.5; border-top:1px solid var(--border); padding-top:12px;}
+</style>
+</head>
+<body>
+
+<h1>Rubik's Clock — Pseudo 6-Simul (p6s) Scrambler</h1>
+<div class="sub">Check the cases you want to drill. Each "Generate" picks one at random from your checked set.</div>
+
+<div class="layout">
+  <div class="panel" style="flex:1 1 520px;">
+    <div class="select-all-row">
+      <button class="secondary" id="selectAllBtn">Select all</button>
+      <button class="secondary" id="clearAllBtn">Clear all</button>
+    </div>
+    <table class="case-table" id="caseTable"></table>
+
+    <button id="genBtn" style="margin-top:14px;">Generate scramble</button>
+    <div class="footer-row">
+      <button class="secondary" id="copyBtn">Copy scramble</button>
+      <button class="secondary" id="answerBtn">Show answer</button>
+    </div>
+
+    <div class="scramble-box" id="scrambleBox">Check some cases, then click "Generate scramble".</div>
+    <div class="meta-tag" id="metaTag"></div>
+
+    <div class="answer-box" id="answerBox"></div>
+  </div>
+
+  <div class="panel">
+    <div class="draw-wrap" id="drawWrap"></div>
+    <div class="note">
+      <b>Reading convention:</b> UPPERCASE (U D L R C) = front face. lowercase (u d l r c), used in the case definitions, = back face labeled after an <b>x2</b> flip. The <b>diagram below</b> reflects that the scramble ends on a <b>y2</b>: the puzzle is left holding what was originally the back face toward the solver, so that's shown as "Front," and the original front (now facing away) is shown as "Back." This may look mirrored left-right relative to how the lowercase case labels are defined (x2) — that's expected, both are correct, just different viewing conventions for the same physical dials.<br><br>
+      <b>Still worth spot-checking:</b> the back-linkage co-rotation sign is derived from first principles, not a verified source. Run one scramble on a real clock and tell me if the back face is off.
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ Physical model ============
+const CORNER_ADJ = { UL:['U','L'], UR:['U','R'], DL:['D','L'], DR:['D','R'] };
+function mod12(n){ return ((n % 12) + 12) % 12; }
+
+function newState(){
+  return { fCorner:{UL:0,UR:0,DL:0,DR:0}, fEdge:{U:0,D:0,L:0,R:0}, fC:0, bEdge:{U:0,D:0,L:0,R:0}, bC:0 };
+}
+function applyFrontMove(state, physicalCorners, n){
+  if(n===0) return;
+  const touched = new Set();
+  for(const c of physicalCorners){ state.fCorner[c]=mod12(state.fCorner[c]+n); CORNER_ADJ[c].forEach(e=>touched.add(e)); }
+  state.fC = mod12(state.fC+n);
+  touched.forEach(e=>{ state.fEdge[e]=mod12(state.fEdge[e]+n); });
+}
+function applyBackMove(state, physicalCorners, n){
+  if(n===0) return;
+  const touched = new Set();
+  for(const c of physicalCorners){ state.fCorner[c]=mod12(state.fCorner[c]-n); CORNER_ADJ[c].forEach(e=>touched.add(e)); }
+  state.bC = mod12(state.bC+n);
+  touched.forEach(e=>{ state.bEdge[e]=mod12(state.bEdge[e]+n); });
+}
+const FRONT_GROUPS = [ ['UR',['UR']],['DR',['DR']],['DL',['DL']],['UL',['UL']],['U',['UL','UR']],['R',['UR','DR']],['D',['DL','DR']],['L',['UL','DL']],['ALL',['UL','UR','DL','DR']] ];
+const BACK_GROUPS  = [ ['U',['UL','UR']],['R',['UL','DL']],['D',['DL','DR']],['L',['UR','DR']],['ALL',['UL','UR','DL','DR']] ];
+function randTurn(){ return Math.floor(Math.random()*12)-5; }
+function fmtTurn(n){ return n>=0 ? (n+'+') : ((-n)+'-'); }
+function generateRawScramble(){
+  const state = newState(); const tokens = [];
+  for(const [label,corners] of FRONT_GROUPS){ const n=randTurn(); applyFrontMove(state,corners,n); tokens.push(label+fmtTurn(n)); }
+  tokens.push('y2');
+  for(const [label,corners] of BACK_GROUPS){ const n=randTurn(); applyBackMove(state,corners,n); tokens.push(label+fmtTurn(n)); }
+  return {state, tokens};
+}
+
+// ============ Grid symmetry (dihedral group, order 8) ============
+const POS_COORD = { UL:[-1,1],U:[0,1],UR:[1,1],L:[-1,0],C:[0,0],R:[1,0],DL:[-1,-1],D:[0,-1],DR:[1,-1] };
+const COORD_POS = {}; for(const k in POS_COORD) COORD_POS[POS_COORD[k].join(',')] = k;
+const TRANSFORMS = [
+  {name:'identity',f:(x,y)=>[x,y]}, {name:'rot90',f:(x,y)=>[-y,x]}, {name:'rot180',f:(x,y)=>[-x,-y]}, {name:'rot270',f:(x,y)=>[y,-x]},
+  {name:'mirror-horiz',f:(x,y)=>[x,-y]}, {name:'mirror-vert',f:(x,y)=>[-x,y]}, {name:'mirror-diag',f:(x,y)=>[y,x]}, {name:'mirror-antidiag',f:(x,y)=>[-y,-x]},
+];
+function applyTransform(pos,T){ const [x,y]=POS_COORD[pos]; const [x2,y2]=T.f(x,y); return COORD_POS[x2+','+y2]; }
+
+// ============ x2 back-label -> physical position ============
+const X2_TO_PHYS = { UL:'DL', UR:'DR', DL:'UL', DR:'UR', U:'D', D:'U', L:'L', R:'R', C:'C' };
+// y2 mirrors left/right, keeps top/bottom -- used only for the visual back-face diagram
+const Y2_TO_PHYS = { UL:'UR', UR:'UL', DL:'DR', DR:'DL', U:'U', D:'D', L:'R', R:'L', C:'C' };
+
+function readPosPhys(state, face, physPos){
+  // like readPos but takes an already-resolved physical position (used for y2 display)
+  if(face==='front'){
+    if(physPos==='C') return state.fC;
+    if(['U','D','L','R'].includes(physPos)) return state.fEdge[physPos];
+    return state.fCorner[physPos];
+  } else {
+    if(physPos==='C') return state.bC;
+    if(['U','D','L','R'].includes(physPos)) return state.bEdge[physPos];
+    return mod12(-state.fCorner[physPos]);
+  }
+}
+
+function readPos(state, face, posLabel){
+  if(face==='front'){
+    if(posLabel==='C') return state.fC;
+    if(['U','D','L','R'].includes(posLabel)) return state.fEdge[posLabel];
+    return state.fCorner[posLabel];
+  } else {
+    const p = X2_TO_PHYS[posLabel];
+    if(p==='C') return state.bC;
+    if(['U','D','L','R'].includes(p)) return state.bEdge[p];
+    return mod12(-state.fCorner[p]);
+  }
+}
+
+// ============ Term-combination helpers (for Tommy memo, case constraints, and per-case answers) ============
+function T_(sign, face, pos){ return {sign, face, pos}; }
+function S(face, pos){ return [T_(1,face,pos)]; }
+function negC(a){ return a.map(t => ({sign:-t.sign, face:t.face, pos:t.pos})); }
+function addC(...combos){ return combos.flat(); }
+function subC(a,b){ return addC(a, negC(b)); }
+function toC(face, fromPos, toPos){ return subC(S(face,toPos), S(face,fromPos)); } // "fromPos to toPos" = value(to)-value(from)
+// "apply A to X, then do X to Y" where X is turned by A first:
+function applyToFirst(A, face, X, Y){ return subC(toC(face,X,Y), A); }   // (Y-X) - A
+// "apply A to Y (the second term), then do X to Y":
+function applyToSecond(A, face, X, Y){ return addC(toC(face,X,Y), A); }  // (Y-X) + A
+
+function comboVal(state, T, terms){
+  let sum = 0;
+  for(const t of terms) sum += t.sign * readPos(state, t.face, applyTransform(t.pos, T));
+  return mod12(sum);
+}
+
+// Tommy 7s base memo (your calcs). face 'front' = UPPERCASE, 'back' = lowercase (x2-labeled).
+const TOMMY_M1 = [ T_(-1,'back','D'), T_(1,'back','C') ];                                                              // -d+c
+const TOMMY_M2 = [ T_(-1,'back','R'), T_(1,'back','DR'), T_(-1,'front','L'), T_(1,'front','U') ];                      // -r+dr-L+U
+const TOMMY_M3 = [ T_(-1,'front','U'), T_(1,'front','L') ];                                                            // -U+L
+const TOMMY_M4 = [ T_(-1,'back','R'), T_(1,'back','D') ];                                                              // -r+d
+const TOMMY_M5 = [ T_(-1,'front','U'), T_(1,'front','UR'), T_(-1,'front','D'), T_(1,'front','C'),
+             T_(-1,'back','UL'), T_(1,'back','L'), T_(1,'back','R') ];                                                 // -U+UR-D+C-ul+l+r
+const TOMMY_M6 = [ T_(-1,'back','C'), T_(1,'back','U'), T_(1,'back','D'),
+             T_(-1,'front','L'), T_(1,'front','UL'), T_(-1,'front','R'), T_(1,'front','DR') ];                         // -c+u+d-L+UL-R+DR
+
+// RHS expressions for the two "fake" cases' constraints
+const rhsFakeAnkh = [ T_(-1,'front','D'), T_(1,'front','C'), T_(-1,'front','R'), T_(1,'front','DR'), T_(-1,'back','U'), T_(1,'back','L') ]; // D to C + R to DR + u to l
+const rhsFakeLine = [ T_(-1,'front','R'), T_(1,'front','D'), T_(-1,'back','L'), T_(1,'back','UL'), T_(-1,'back','U'), T_(1,'back','C') ];   // R to D + l to ul + u to c
+
+// ============ p6s cases ============
+// checks: array of {a:terms, b:terms, neg:bool} -- comboVal(a) === comboVal(b), or === -comboVal(b) if neg
+// answerFormulas: ordered [{label, combo}] (or {label, note} for non-numeric steps) shown by "Show answer"
+const CASE_GROUPS = [
+  { title:'Group 1 — UR cases', cases: [
+    { name:'L shape', desc:'c = d = r',
+      checks:[ {a:S('back','C'),b:S('back','D')}, {a:S('back','D'),b:S('back','R')} ],
+      answerFormulas: () => {
+        const m1 = addC( toC('back','DR','R'), toC('front','U','L') );        // dr to r + U to L
+        const m2 = toC('front','U','L');                                       // U to L
+        const m3 = negC( addC( toC('front','C','U'), S('front','D'), toC('back','L','UL') ) ); // -(C to U + D + l to ul)
+        const m4 = addC( toC('back','DR','D'), S('back','U'), toC('front','R','DR'), toC('front','L','UL') ); // dr to d + u + R to DR + L to UL
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4} ];
+      } },
+    { name:'Line', desc:'c = u = d',
+      checks:[ {a:S('back','C'),b:S('back','U')}, {a:S('back','U'),b:S('back','D')} ],
+      answerFormulas: () => {
+        const m1 = addC( toC('back','DR','R'), toC('front','U','L') );
+        const m2 = addC( toC('front','R','D'), toC('back','L','UL') );
+        const m3 = toC('back','R','D');
+        const m4 = applyToFirst(m2, 'front','U','L');
+        const m5 = negC( addC( toC('front','C','L'), S('front','R') ) );
+        const m6 = addC( toC('back','DR','R'), toC('back','UL','L'), S('back','C'), toC('front','U','UL'), toC('front','D','DR') );
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4}, {label:'m5',combo:m5}, {label:'m6',combo:m6} ];
+      } },
+    { name:'Hook', desc:'c = d,  u = l',
+      checks:[ {a:S('back','C'),b:S('back','D')}, {a:S('back','U'),b:S('back','L')} ],
+      answerFormulas: () => {
+        const m1 = addC( toC('back','DR','R'), toC('front','U','L') );
+        const m2 = toC('front','R','D');
+        const m3 = toC('back','R','D');
+        const m4 = applyToFirst(m2, 'front','U','L');
+        const m5 = negC( addC( toC('front','C','L'), S('front','R'), toC('back','U','UL') ) );
+        const m6 = addC( toC('back','DR','R'), S('back','L'), toC('front','U','UL'), toC('front','D','DR') );
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4}, {label:'m5',combo:m5}, {label:'m6',combo:m6} ];
+      } },
+    { name:'Slashless 1', desc:'c = d,  m5 = \u2212(m6)', checks:[ {a:S('back','C'),b:S('back','D')}, {a:TOMMY_M5,b:TOMMY_M6,neg:true} ],
+      answerFormulas: () => {
+        const n1 = addC( toC('back','DR','R'), toC('front','U','L') );        // dr to r + U to L
+        const n2 = addC( toC('front','C','L'), S('front','D'), toC('back','L','UL') ); // C to L + D + l to ul
+        const n3 = toC('back','R','D');                                       // r to d
+        const n4 = applyToFirst(TOMMY_M2, 'front','U','L');                   // apply (Tommy) m2 to U, then U to L
+        return [ {label:'n1',combo:n1}, {label:'n2',combo:n2}, {label:'n3',combo:n3}, {label:'n4',combo:n4} ];
+      } },
+    { name:'Fake Ankh', desc:'c = d,  m2 = D\u2192C + R\u2192DR + u\u2192l', checks:[ {a:S('back','C'),b:S('back','D')}, {a:TOMMY_M2,b:rhsFakeAnkh} ],
+      answerFormulas: () => {
+        const n1 = addC( toC('back','DR','R'), toC('front','U','L') );        // dr to r + U to L
+        const n2 = toC('front','C','D');                                      // C to D
+        const n3 = toC('back','R','D');                                       // r to d
+        const n4 = applyToFirst(TOMMY_M2, 'front','U','L');                   // apply (Tommy) m2 to U, U to L
+        const n5 = negC( addC( S('front','L'), toC('back','L','UL') ) );      // -(L + l to ul)
+        const n6 = addC( S('back','L'), toC('front','L','UL') );              // l + L to UL
+        return [ {label:'n1',combo:n1}, {label:'n2',combo:n2}, {label:'n3',combo:n3}, {label:'n4',combo:n4}, {label:'n5',combo:n5}, {label:'n6',combo:n6} ];
+      } },
+  ]},
+  { title:'Group 2 — UL cases', cases: [
+    { name:'Fall', desc:'c = d,  U = L',
+      checks:[ {a:S('back','C'),b:S('back','D')}, {a:S('front','U'),b:S('front','L')} ],
+      answerFormulas: () => {
+        const m1 = toC('back','R','D');                                       // r to d
+        const m2 = toC('back','R','DR');                                      // r to dr
+        const m3 = negC( addC( toC('front','C','U'), S('front','D'), toC('back','L','UL'), toC('back','R','D') ) ); // -(C to U + D + l to ul + r to d)
+        const m4 = addC( toC('back','DR','D'), S('back','U'), toC('front','R','DR'), toC('front','L','UL') );
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4} ];
+      } },
+    { name:'Ankh', desc:'c = d,  C = D',
+      checks:[ {a:S('back','C'),b:S('back','D')}, {a:S('front','C'),b:S('front','D')} ],
+      answerFormulas: () => {
+        const m1 = addC( toC('front','DR','R'), toC('back','U','L') );        // DR to R + u to l
+        const m2 = addC( toC('back','R','DR'), toC('front','L','U') );        // r to dr + L to U
+        const m3 = applyToFirst(m1, 'back','R','D');                          // apply m1 to r, then r to d
+        const m4 = toC('front','U','L');                                      // U to L
+        const m5 = negC( addC( toC('front','DR','R'), S('front','L'), toC('back','U','UL') ) ); // -(DR to R + L + u to ul)
+        const m6 = addC( toC('back','DR','R'), S('back','L'), toC('front','U','UL') );          // dr to r + l + U to UL
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4}, {label:'m5',combo:m5}, {label:'m6',combo:m6} ];
+      } },
+    { name:'Yah', desc:'c = d,  D = R',
+      checks:[ {a:S('back','C'),b:S('back','D')}, {a:S('front','D'),b:S('front','R')} ],
+      answerFormulas: () => {
+        const m1 = toC('back','U','L');                                       // u to l
+        const m2 = addC( toC('back','R','DR'), toC('front','L','U') );        // r to dr + L to U
+        const m3 = applyToFirst(m1, 'back','R','D');                          // apply m1 to r, then r to d
+        const m4 = toC('front','U','L');                                      // U to L
+        const m5 = negC( addC( toC('front','C','L'), S('front','R'), toC('back','U','UL') ) );  // -(C to L + R + u to ul)
+        const m6 = addC( toC('back','DR','R'), S('back','L'), toC('front','U','UL'), toC('front','D','DR') );
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4}, {label:'m5',combo:m5}, {label:'m6',combo:m6} ];
+      } },
+    { name:'Fake Line', desc:'c = d,  m2 = R\u2192D + l\u2192ul + u\u2192c', checks:[ {a:S('back','C'),b:S('back','D')}, {a:TOMMY_M2,b:rhsFakeLine} ],
+      answerFormulas: () => {
+        const n1 = toC('back','U','C');                                       // u to c
+        const n2 = addC( toC('back','R','DR'), toC('front','L','U') );        // r to dr + L to U
+        const n4 = toC('front','U','L');                                      // U to L
+        const n5 = negC( addC( toC('front','C','U'), S('front','R'), toC('back','R','DR') ) ); // -(C to U + R + r to dr)
+        const n6 = addC( toC('back','DR','R'), S('back','D'), toC('front','R','DR'), toC('front','U','UL') ); // dr to r + d + R to DR + U to UL
+        return [ {label:'n1',combo:n1}, {label:'n2',combo:n2}, {label:'n3',note:'trace (no calculation \u2014 just track visually)'}, {label:'n4',combo:n4}, {label:'n5',combo:n5}, {label:'n6',combo:n6} ];
+      } },
+  ]},
+  { title:'Group 3 — Misc', cases: [
+    { name:'Right tilt', desc:'c = r,  C = U',
+      checks:[ {a:S('back','C'),b:S('back','R')}, {a:S('front','C'),b:S('front','U')} ],
+      answerFormulas: () => {
+        const m1 = addC( toC('back','D','DR'), toC('front','UL','U') );       // d to dr + UL to U
+        const m2 = toC('back','D','C');                                       // d to c
+        const m3 = negC( addC( toC('back','L','UL'), S('front','D') ) );      // -(l to ul + D)
+        const m4 = addC( toC('front','R','UR'), toC('front','L','UL'), toC('back','UR','U'), S('back','D') ); // R to UR + L to UL + ur to u + d
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4} ];
+      } },
+    { name:'Left tilt', desc:'c = l,  C = U (mirror of Right tilt)',
+      checks:[ {a:S('back','C'),b:S('back','L')}, {a:S('front','C'),b:S('front','U')} ],
+      answerFormulas: () => {
+        const m1 = toC('back','D','C');                                       // d to c
+        const m2 = addC( toC('back','D','DL'), toC('front','UR','U') );       // d to dl + UR to U
+        const m3 = addC( toC('front','R','UR'), toC('front','L','UL'), toC('back','UL','U'), S('back','D') ); // R to UR + L to UL + ul to u + d
+        const m4 = negC( addC( toC('back','R','UR'), S('front','D') ) );      // -(r to ur + D)
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4} ];
+      } },
+    { name:'Mirror Yah', desc:'c = r,  U = L',
+      checks:[ {a:S('back','C'),b:S('back','R')}, {a:S('front','U'),b:S('front','L')} ],
+      answerFormulas: () => {
+        const m1 = toC('back','D','C');                                       // d to c
+        const m2 = toC('back','D','DR');                                      // d to dr
+        const m3 = negC( addC( toC('front','C','U'), S('front','D'), toC('back','L','UL') ) ); // -(C to U + D + l to ul)
+        const m4 = addC( toC('back','DR','D'), S('back','U'), toC('front','R','DR'), toC('front','L','UL') );
+        return [ {label:'m1',combo:m1}, {label:'m2',combo:m2}, {label:'m3',combo:m3}, {label:'m4',combo:m4} ];
+      } },
+    { name:'Slashless 2', desc:'d = r,  m5 = \u2212(m6)', checks:[ {a:S('back','D'),b:S('back','R')}, {a:TOMMY_M5,b:TOMMY_M6,neg:true} ],
+      answerFormulas: () => {
+        const n1 = toC('back','D','C');                                       // d to c
+        const n2 = negC( addC( toC('back','L','UL'), toC('front','C','U'), S('front','D') ) ); // -(l to ul + C to U + D)
+        const appliedAmt = addC(n2, toC('front','U','L'));
+        const n3 = applyToSecond(appliedAmt, 'back','DR','R');                // apply (n2 + U to L) to r, then dr to r
+        const n4 = toC('front','U','L');                                      // U to L
+        return [ {label:'n1',combo:n1}, {label:'n2',combo:n2}, {label:'n3',combo:n3}, {label:'n4',combo:n4} ];
+      } },
+    { name:'Slashless 3', desc:'m2 = \u2212(m5) = m6', checks:[ {a:TOMMY_M2,b:TOMMY_M5,neg:true}, {a:TOMMY_M5,b:TOMMY_M6,neg:true} ],
+      answerFormulas: () => {
+        const n1 = toC('back','D','C');                                       // d to c
+        const n2 = addC( toC('back','D','C'), toC('back','R','DR'), toC('front','L','U') ); // d to c + r to dr + L to U
+        const n3 = applyToSecond(n1, 'back','R','D');                         // apply m1(=n1) to d, then r to d
+        const n4 = toC('front','U','L');                                      // (Tommy-memo) U to L
+        return [ {label:'n1',combo:n1}, {label:'n2',combo:n2}, {label:'n3',combo:n3}, {label:'n4',combo:n4} ];
+      } },
+  ]},
+];
+const ALL_CASES = CASE_GROUPS.flatMap(g => g.cases);
+
+function checkCase(state, caseObj, T){
+  for(const ch of caseObj.checks){
+    const av = comboVal(state, T, ch.a);
+    const bv = comboVal(state, T, ch.b);
+    const target = ch.neg ? mod12(-bv) : bv;
+    if(av !== target) return false;
+  }
+  return true;
+}
+
+function generateForCase(caseObj, maxTries=20000){
+  const T = TRANSFORMS[Math.floor(Math.random()*TRANSFORMS.length)];
+  for(let i=0;i<maxTries;i++){
+    const {state, tokens} = generateRawScramble();
+    if(checkCase(state, caseObj, T)) return {state, tokens, T};
+  }
+  return null;
+}
+
+// ============ UI: build checkbox groups ============
+const caseTableEl = document.getElementById('caseTable');
+ALL_CASES.forEach((c,i)=> c._id = 'case_' + i);
+
+const maxRows = Math.max(...CASE_GROUPS.map(g => g.cases.length));
+
+// header row
+const thead = document.createElement('tr');
+CASE_GROUPS.forEach(group => {
+  const th = document.createElement('th');
+  th.textContent = group.title;
+  thead.appendChild(th);
+});
+caseTableEl.appendChild(thead);
+
+// body rows
+for(let row = 0; row < maxRows; row++){
+  const tr = document.createElement('tr');
+  CASE_GROUPS.forEach(group => {
+    const td = document.createElement('td');
+    const c = group.cases[row];
+    if(c){
+      td.className = 'case-cell';
+      td.innerHTML = `<div class="row">
+        <input type="checkbox" id="${c._id}" checked>
+        <label class="lbl" for="${c._id}"><span class="name">${c.name}</span><span class="desc">${c.desc}</span></label>
+      </div>`;
+    } else {
+      td.className = 'case-cell empty';
+    }
+    tr.appendChild(td);
+  });
+  caseTableEl.appendChild(tr);
+}
+
+document.getElementById('selectAllBtn').addEventListener('click', () => {
+  ALL_CASES.forEach(c => document.getElementById(c._id).checked = true);
+});
+document.getElementById('clearAllBtn').addEventListener('click', () => {
+  ALL_CASES.forEach(c => document.getElementById(c._id).checked = false);
+});
+
+function getCheckedCases(){
+  return ALL_CASES.filter(c => document.getElementById(c._id).checked);
+}
+
+// ============ Drawing ============
+function dialSVG(value){
+  const rad = (value%12)*(Math.PI/6) - Math.PI/2;
+  const cx=28, cy=28, r=24;
+  const hx = cx + Math.cos(rad)*(r-6), hy = cy + Math.sin(rad)*(r-6);
+  return `<svg class="dial" viewBox="0 0 56 56">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="#1e222b" stroke="#3a4050" stroke-width="1.5"/>
+    <circle cx="${cx}" cy="${cy}" r="1.6" fill="#5b8cff"/>
+    <line x1="${cx}" y1="${cy}" x2="${hx.toFixed(2)}" y2="${hy.toFixed(2)}" stroke="#5b8cff" stroke-width="2.4" stroke-linecap="round"/>
+  </svg>`;
+}
+function renderFace(title, grid){
+  const order = ['UL','U','UR','L','C','R','DL','D','DR'];
+  let cells = '';
+  for(const k of order) cells += `<div class="dial-cell">${dialSVG(grid[k])}<div class="dial-label">${k}</div></div>`;
+  return `<div class="face"><h3>${title}</h3><div class="grid3">${cells}</div></div>`;
+}
+function renderState(state){
+  const origFront = { UL:state.fCorner.UL, U:state.fEdge.U, UR:state.fCorner.UR, L:state.fEdge.L, C:state.fC, R:state.fEdge.R, DL:state.fCorner.DL, D:state.fEdge.D, DR:state.fCorner.DR };
+  const y2Grid = {};
+  for(const y2label of ['UL','U','UR','L','C','R','DL','D','DR']) y2Grid[y2label] = readPosPhys(state,'back',Y2_TO_PHYS[y2label]);
+  // the scramble ends with a y2, so the puzzle is left holding what was originally the back
+  // face-up toward the solver -- swap which grid gets the "Front" label accordingly.
+  document.getElementById('drawWrap').innerHTML = renderFace('Front', y2Grid) + renderFace('Back', origFront);
+}
+
+// ============ Generate / answer ============
+const scrambleBox = document.getElementById('scrambleBox');
+const metaTag = document.getElementById('metaTag');
+const answerBox = document.getElementById('answerBox');
+let currentTokens = [], currentResult = null;
+
+function renderScrambleTokens(tokens){
+  scrambleBox.innerHTML = tokens.map(t => t==='y2' ? '<span class="tag">y2</span>' : t).join(' ');
+}
+
+function hideAnswer(){
+  answerBox.classList.remove('show');
+  answerBox.innerHTML = '';
+  document.getElementById('answerBtn').textContent = 'Show answer';
+}
+
+document.getElementById('genBtn').addEventListener('click', () => {
+  const checked = getCheckedCases();
+  if(checked.length === 0){ scrambleBox.textContent = 'Check at least one case first.'; return; }
+  const caseObj = checked[Math.floor(Math.random()*checked.length)];
+  scrambleBox.textContent = 'Searching...';
+  hideAnswer();
+  setTimeout(() => {
+    const result = generateForCase(caseObj);
+    if(!result){ scrambleBox.textContent = 'Could not find a matching scramble for ' + caseObj.name + ' — try again.'; return; }
+    currentTokens = result.tokens;
+    currentResult = { ...result, caseObj };
+    renderScrambleTokens(result.tokens);
+    renderState(result.state);
+    metaTag.textContent = 'case: ' + caseObj.name + '   |   orientation: ' + result.T.name;
+  }, 10);
+});
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  if(currentTokens.length===0) return;
+  navigator.clipboard.writeText(currentTokens.join(' '));
+});
+
+document.getElementById('answerBtn').addEventListener('click', () => {
+  if(!currentResult){ return; }
+  if(answerBox.classList.contains('show')){ hideAnswer(); return; }
+  const {state, T, caseObj} = currentResult;
+  let html = `<div class="caseline">${caseObj.name} — ${caseObj.desc}</div>`;
+  for(const entry of caseObj.answerFormulas()){
+    if(entry.note){ html += `${entry.label}: ${entry.note}<br>`; }
+    else { html += `${entry.label}: ${comboVal(state, T, entry.combo)}<br>`; }
+  }
+  answerBox.innerHTML = html;
+  answerBox.classList.add('show');
+  document.getElementById('answerBtn').textContent = 'Hide answer';
+});
+</script>
+</body>
+</html>
