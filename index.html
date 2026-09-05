@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rubik's Clock p6s Scrambler</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h1>Rubik's Clock — Pseudo 6-Simul (p6s) Scrambler</h1>
+
+<div class="layout">
+  <div class="panel" style="flex:1 1 520px;">
+    <div class="select-all-row">
+      <button class="secondary" id="selectAllBtn">Select all</button>
+      <button class="secondary" id="clearAllBtn">Clear all</button>
+    </div>
+    <table class="case-table" id="caseTable"></table>
+
+    <button id="genBtn" style="margin-top:14px;">Generate scramble</button>
+    <div class="footer-row">
+      <button class="secondary" id="copyBtn">Copy scramble</button>
+      <button class="secondary" id="answerBtn">Show answer</button>
+    </div>
+
+    <div class="answer-box" id="answerBox"></div>
+  </div>
+
+  <div class="panel">
+    <div class="scramble-box" id="scrambleBox">Check some cases, then click "Generate scramble".</div>
+    <div class="meta-tag" id="metaTag"></div>
+    <div class="draw-wrap" id="drawWrap"></div>
+  </div>
+</div>
+<script src="script.js"></script>
+</body>
+</html>
