@@ -408,6 +408,10 @@ function hideAnswer(){
 
 function formatSigned(v){ return v >= 7 ? (v - 12) : v; }
 
+function getApplicableCaseNames(state){
+  return ALL_CASES.filter(c => allValidOrientations(state, c).length > 0).map(c => c.name);
+}
+
 // Builds answer HTML for every p6s case that applies to this scramble -- not just the one it was
 // generated for. Some scrambles happen to also satisfy other cases' constraints (e.g. an L-shape
 // scramble can sometimes also be read as Fall or Mirror Yah), and it's useful to see all of them.
@@ -779,29 +783,31 @@ function advanceTimer(){
       timerDisplay.textContent = 'DNF';
       timerDisplay.className = 'timer-display big dnf';
       timerNote.textContent = 'puzzle not solved';
-      recordResult({ value: null, dnf: true, penalty: false, raw: solveMs });
+      recordResult({ value: null, dnf: true, penalty: false, raw: solveMs, caseName: currentResult ? currentResult.caseObj.name : null, alternatives: currentResult ? getApplicableCaseNames(currentResult.state) : [] });
       generateNewScramble();
       return;
     }
 
     const inspectionSec = inspectionMs / 1000;
+    const solveCaseName = currentResult ? currentResult.caseObj.name : null;
+    const solveAlternatives = currentResult ? getApplicableCaseNames(currentResult.state) : [];
 
     if(inspectionSec >= 17){
       timerDisplay.textContent = 'DNF';
       timerDisplay.className = 'timer-display big dnf';
       timerNote.textContent = 'inspection was ' + formatSeconds(inspectionMs,1) + 's (17s or over \u2014 DNF)';
-      recordResult({ value: null, dnf: true, penalty: false, raw: solveMs });
+      recordResult({ value: null, dnf: true, penalty: false, raw: solveMs, caseName: solveCaseName, alternatives: solveAlternatives });
     } else if(inspectionSec >= 15){
       const finalMs = solveMs + 2000;
       timerDisplay.textContent = formatSeconds(finalMs, 2) + '+';
       timerDisplay.className = 'timer-display big';
       timerNote.textContent = '+2s penalty \u2014 inspection was ' + formatSeconds(inspectionMs,1) + 's (15\u201317s)';
-      recordResult({ value: finalMs, dnf: false, penalty: true, raw: solveMs });
+      recordResult({ value: finalMs, dnf: false, penalty: true, raw: solveMs, caseName: solveCaseName, alternatives: solveAlternatives });
     } else {
       timerDisplay.textContent = formatSeconds(solveMs, 2);
       timerDisplay.className = 'timer-display big';
       timerNote.textContent = 'inspection was ' + formatSeconds(inspectionMs,1) + 's \u2014 no penalty';
-      recordResult({ value: solveMs, dnf: false, penalty: false, raw: solveMs });
+      recordResult({ value: solveMs, dnf: false, penalty: false, raw: solveMs, caseName: solveCaseName, alternatives: solveAlternatives });
     }
 
     generateNewScramble();
@@ -833,28 +839,28 @@ function trimmedAvgOf(window, trimEachSide){
   return sum / trimmed.length;
 }
 
-function currentStat(windowSize, trimEachSide){
-  if(solveResults.length < windowSize) return null;
-  return trimmedAvgOf(solveResults.slice(-windowSize), trimEachSide);
+function currentStat(results, windowSize, trimEachSide){
+  if(results.length < windowSize) return null;
+  return trimmedAvgOf(results.slice(-windowSize), trimEachSide);
 }
 
-function bestStat(windowSize, trimEachSide){
+function bestStat(results, windowSize, trimEachSide){
   let best = null;
-  for(let i=0; i+windowSize<=solveResults.length; i++){
-    const val = trimmedAvgOf(solveResults.slice(i, i+windowSize), trimEachSide);
+  for(let i=0; i+windowSize<=results.length; i++){
+    const val = trimmedAvgOf(results.slice(i, i+windowSize), trimEachSide);
     if(val !== 'DNF' && (best===null || val < best)) best = val;
   }
   return best;
 }
 
-function currentSingle(){
-  if(solveResults.length===0) return null;
-  const last = solveResults[solveResults.length-1];
+function currentSingle(results){
+  if(results.length===0) return null;
+  const last = results[results.length-1];
   return last.dnf ? 'DNF' : last.value;
 }
-function bestSingle(){
+function bestSingle(results){
   let best = null;
-  for(const r of solveResults) if(!r.dnf && (best===null || r.value < best)) best = r.value;
+  for(const r of results) if(!r.dnf && (best===null || r.value < best)) best = r.value;
   return best;
 }
 
@@ -875,13 +881,33 @@ const STAT_DEFS = [
 
 const statsTable = document.getElementById('statsTable');
 const resultsList = document.getElementById('resultsList');
+let statsFilterCase = 'all'; // 'all' or a specific case name
+
+(function populateStatsFilterOptions(){
+  const sel = document.getElementById('statsFilterSelect');
+  if(!sel) return;
+  for(const group of CASE_GROUPS){
+    for(const c of group.cases){
+      const opt = document.createElement('option');
+      opt.value = c.name;
+      opt.textContent = c.name;
+      sel.appendChild(opt);
+    }
+  }
+})();
+
+function getFilteredResults(){
+  if(statsFilterCase === 'all') return solveResults;
+  return solveResults.filter(r => r.caseName === statsFilterCase);
+}
 
 function renderStats(){
+  const filtered = getFilteredResults();
   let html = '<tr><th>stat</th><th>current</th><th>best</th></tr>';
   for(const def of STAT_DEFS){
     let cur, best;
-    if(def.label === 'single'){ cur = currentSingle(); best = bestSingle(); }
-    else { cur = currentStat(def.windowSize, def.trim); best = bestStat(def.windowSize, def.trim); }
+    if(def.label === 'single'){ cur = currentSingle(filtered); best = bestSingle(filtered); }
+    else { cur = currentStat(filtered, def.windowSize, def.trim); best = bestStat(filtered, def.windowSize, def.trim); }
     html += `<tr><td class="label">${def.label}</td><td>${fmtStat(cur)}</td><td>${fmtStat(best)}</td></tr>`;
   }
   statsTable.innerHTML = html;
@@ -896,15 +922,35 @@ function renderResultsList(){
   for(let i = solveResults.length - 1; i >= 0; i--){
     const r = solveResults[i];
     const num = i + 1;
+    let caseHtml;
+    if(r.alternatives && r.alternatives.length > 1){
+      const opts = r.alternatives.map(name => `<option value="${name}"${name===r.caseName?' selected':''}>${name}</option>`).join('');
+      caseHtml = `<select class="case-select" data-idx="${i}">${opts}</select>`;
+    } else {
+      caseHtml = `<span class="case-label">${r.caseName || ''}</span>`;
+    }
     if(r.dnf){
-      html += `<div class="result-row dnf"><span><span class="result-num">${num}.</span>DNF</span><span></span></div>`;
+      html += `<div class="result-row dnf"><span><span class="result-num">${num}.</span>DNF</span>${caseHtml}</div>`;
     } else {
       const penaltyTag = r.penalty ? '<span class="penalty-tag">+2</span>' : '';
-      html += `<div class="result-row"><span><span class="result-num">${num}.</span>${(r.value/1000).toFixed(2)}${penaltyTag}</span><span></span></div>`;
+      html += `<div class="result-row"><span><span class="result-num">${num}.</span>${(r.value/1000).toFixed(2)}${penaltyTag}</span>${caseHtml}</div>`;
     }
   }
   resultsList.innerHTML = html;
 }
+
+safeListen(resultsList, 'change', (e) => {
+  if(e.target && e.target.classList.contains('case-select')){
+    const idx = parseInt(e.target.getAttribute('data-idx'), 10);
+    solveResults[idx].caseName = e.target.value;
+    renderStats();
+  }
+});
+
+safeListen('statsFilterSelect', 'change', (e) => {
+  statsFilterCase = e.target.value;
+  renderStats();
+});
 
 function recordResult(result){
   solveResults.push(result);
