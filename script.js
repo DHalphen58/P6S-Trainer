@@ -175,7 +175,7 @@ const CASE_GROUPS = [
         return [ {label:'n1',combo:n1}, {label:'n2',combo:n2}, {label:'n3',combo:n3}, {label:'n4',combo:n4}, {label:'n5',combo:n5}, {label:'n6',combo:n6} ];
       } },
   ]},
-  { title:'Group 2 — UL cases', cases: [
+  { title:'Group 2 — ul cases', cases: [
     { name:'Fall', desc:'c = d,  U = L',
       checks:[ {a:S('back','C'),b:S('back','D')}, {a:S('front','U'),b:S('front','L')} ],
       answerFormulas: () => {
@@ -308,6 +308,15 @@ function generateForCase(caseObj, maxTries=20000){
 }
 
 // ============ UI: build checkbox groups ============
+// A missing element here would otherwise throw at script-load time and silently prevent every
+// statement after it in this file from ever running (including unrelated features) -- so every
+// top-level listener attachment goes through this guard instead of a bare .addEventListener call.
+function safeListen(idOrEl, event, handler, options){
+  const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+  if(el) el.addEventListener(event, handler, options);
+  else console.error('Element "' + idOrEl + '" not found in the page \u2014 check index.html matches this script.js (a stale/mismatched copy of one of the two files is the most common cause).');
+}
+
 const caseTableEl = document.getElementById('caseTable');
 ALL_CASES.forEach((c,i)=> c._id = 'case_' + i);
 
@@ -342,10 +351,10 @@ for(let row = 0; row < maxRows; row++){
   caseTableEl.appendChild(tr);
 }
 
-document.getElementById('selectAllBtn').addEventListener('click', () => {
+safeListen('selectAllBtn', 'click', () => {
   ALL_CASES.forEach(c => document.getElementById(c._id).checked = true);
 });
-document.getElementById('clearAllBtn').addEventListener('click', () => {
+safeListen('clearAllBtn', 'click', () => {
   ALL_CASES.forEach(c => document.getElementById(c._id).checked = false);
 });
 
@@ -379,11 +388,13 @@ function renderState(state){
   document.getElementById('drawWrap').innerHTML = renderFace('Front', y2Grid) + renderFace('Back', origFront);
 }
 
-// ============ Generate / answer ============
+// ============ Generate / answer / history ============
 const scrambleBox = document.getElementById('scrambleBox');
 const metaTag = document.getElementById('metaTag');
 const answerBox = document.getElementById('answerBox');
+const reviewBox = document.getElementById('reviewBox');
 let currentTokens = [], currentResult = null;
+let scrambleHistory = []; // each entry: { tokens, state, orientations, caseObj }
 
 function renderScrambleTokens(tokens){
   scrambleBox.innerHTML = tokens.map(t => t==='y2' ? '<span class="tag">y2</span>' : t).join(' ');
@@ -395,7 +406,61 @@ function hideAnswer(){
   document.getElementById('answerBtn').textContent = 'Show answer';
 }
 
-document.getElementById('genBtn').addEventListener('click', () => {
+function formatSigned(v){ return v >= 7 ? (v - 12) : v; }
+
+// Builds answer HTML for every p6s case that applies to this scramble -- not just the one it was
+// generated for. Some scrambles happen to also satisfy other cases' constraints (e.g. an L-shape
+// scramble can sometimes also be read as Fall or Mirror Yah), and it's useful to see all of them.
+function buildAnswerHtml(entry){
+  const { state, caseObj: intendedCase } = entry;
+  const matches = ALL_CASES
+    .map(c => ({ caseObj: c, orientations: allValidOrientations(state, c) }))
+    .filter(m => m.orientations.length > 0);
+  matches.sort((a,b) => (a.caseObj === intendedCase ? -1 : b.caseObj === intendedCase ? 1 : 0));
+
+  let html = '';
+  matches.forEach((m, mi) => {
+    const isIntended = (m.caseObj === intendedCase);
+    html += `<div class="caseline">${m.caseObj.name}${isIntended ? '' : ' \u2014 also applies'} \u2014 ${m.caseObj.desc}</div>`;
+    m.orientations.forEach((orientation, idx) => {
+      html += `<div style="color:var(--dim); font-size:11.5px; margin-top:${idx>0?'10px':'2px'};">orientation${m.orientations.length>1?' '+(idx+1):''} (${orientationName(orientation)}):</div>`;
+      for(const entryFormula of m.caseObj.answerFormulas()){
+        if(entryFormula.note){ html += `${entryFormula.label}: ${entryFormula.note}<br>`; }
+        else { html += `${entryFormula.label}: ${formatSigned(comboVal(state, orientation, entryFormula.combo))}<br>`; }
+      }
+    });
+    if(mi < matches.length - 1) html += `<div style="border-top:1px solid var(--border); margin:12px 0;"></div>`;
+  });
+  return html;
+}
+
+// Always reflects the most recently generated scramble -- this never navigates backward.
+function renderCurrentScramble(entry){
+  currentTokens = entry.tokens;
+  currentResult = entry;
+  hideAnswer();
+  renderScrambleTokens(entry.tokens);
+  renderState(entry.state);
+  metaTag.textContent = 'case: ' + entry.caseObj.name + '   |   ' + entry.orientations.length + ' valid orientation' + (entry.orientations.length>1?'s':'') + ' found';
+  const reviewBtn = document.getElementById('reviewPrevBtn');
+  if(reviewBtn) reviewBtn.disabled = (scrambleHistory.length < 2);
+  else console.error('reviewPrevBtn element not found in the page \u2014 check index.html matches this script.js');
+  resetVirtualClockToCurrent();
+}
+
+// Shows the scramble immediately before the current one, plus its answer, in a separate panel --
+// the current scramble on screen is untouched.
+function showReviewEntry(){
+  if(scrambleHistory.length < 2){ reviewBox.classList.remove('show'); return; }
+  const entry = scrambleHistory[scrambleHistory.length - 2];
+  const tokensHtml = entry.tokens.map(t => t==='y2' ? '<span class="tag">y2</span>' : t).join(' ');
+  reviewBox.innerHTML = `<div class="review-title">Previous scramble</div>
+    <div class="review-scramble">${tokensHtml}</div>
+    <div class="review-orient">${buildAnswerHtml(entry)}</div>`;
+  reviewBox.classList.add('show');
+}
+
+function generateNewScramble(){
   const checked = getCheckedCases();
   if(checked.length === 0){ scrambleBox.textContent = 'Check at least one case first.'; return; }
   const caseObj = checked[Math.floor(Math.random()*checked.length)];
@@ -404,34 +469,483 @@ document.getElementById('genBtn').addEventListener('click', () => {
   setTimeout(() => {
     const result = generateForCase(caseObj);
     if(!result){ scrambleBox.textContent = 'Could not find a matching scramble for ' + caseObj.name + ' — try again.'; return; }
-    currentTokens = result.tokens;
-    currentResult = { ...result, caseObj };
-    renderScrambleTokens(result.tokens);
-    renderState(result.state);
-    metaTag.textContent = 'case: ' + caseObj.name + '   |   ' + result.orientations.length + ' valid orientation' + (result.orientations.length>1?'s':'') + ' found';
+    const entry = { ...result, caseObj };
+    scrambleHistory.push(entry);
+    renderCurrentScramble(entry);
   }, 10);
-});
+}
 
-document.getElementById('copyBtn').addEventListener('click', () => {
+safeListen('genBtn', 'click', generateNewScramble);
+
+safeListen('reviewPrevBtn', 'click', showReviewEntry);
+
+safeListen('copyBtn', 'click', () => {
   if(currentTokens.length===0) return;
   navigator.clipboard.writeText(currentTokens.join(' '));
 });
 
-function formatSigned(v){ return v >= 7 ? (v - 12) : v; }
-
-document.getElementById('answerBtn').addEventListener('click', () => {
+safeListen('answerBtn', 'click', () => {
   if(!currentResult){ return; }
   if(answerBox.classList.contains('show')){ hideAnswer(); return; }
-  const {state, orientations, caseObj} = currentResult;
-  let html = `<div class="caseline">${caseObj.name} — ${caseObj.desc}</div>`;
-  orientations.forEach((orientation, idx) => {
-    html += `<div style="color:var(--dim); font-size:11.5px; margin-top:${idx>0?'10px':'2px'};">orientation${orientations.length>1?' '+(idx+1):''} (${orientationName(orientation)}):</div>`;
-    for(const entry of caseObj.answerFormulas()){
-      if(entry.note){ html += `${entry.label}: ${entry.note}<br>`; }
-      else { html += `${entry.label}: ${formatSigned(comboVal(state, orientation, entry.combo))}<br>`; }
-    }
-  });
-  answerBox.innerHTML = html;
+  answerBox.innerHTML = buildAnswerHtml(currentResult);
   answerBox.classList.add('show');
   document.getElementById('answerBtn').textContent = 'Hide answer';
 });
+
+// ============ Virtual Clock (interactive) ============
+function cloneState(s){
+  return { fCorner:{...s.fCorner}, fEdge:{...s.fEdge}, fC:s.fC, bEdge:{...s.bEdge}, bC:s.bC };
+}
+
+let vcState = newState();
+// Pins store a FIXED mechanical fact (which linkage side each corner engages), independent of
+// viewing side -- 'front' or 'back'. This does not change when the view is flipped/rotated; only
+// the pin badge's visual up/down indicator (computed at render time) is relative to the current view.
+let vcPins = { UL:'front', UR:'front', DL:'front', DR:'front' };
+
+// The view's current orientation, tracked as a genuine element of the 8-element symmetry group
+// (rotation k=0..3, flipped s=0 or 1) so that composing x2/y2/z/z' always accumulates correctly --
+// e.g. x2 then y2 lands at the same place as z2, rather than each button being an independent toggle.
+let vcRotK = 0, vcFlipS = 0;
+let appMode = 'scramble'; // 'scramble' | 'virtual'
+
+const VC_GRID_ORDER = ['UL','U','UR','L','C','R','DL','D','DR'];
+const VC_CORNERS = ['UL','UR','DL','DR'];
+
+// Canonical resolver: for view state (k,s), s=1 is always expressed via the x2 convention
+// internally (verified equivalent to y2 wherever the two overlap, since y2 = z2 . x2 in this group).
+function vcGridSlotToPhysical(gridLabel, k, s){
+  if(s === 0) return rotateN(ROT_B_MAP, gridLabel, k);
+  return X2_TO_PHYS[rotateN(ROT_F_MAP, gridLabel, k)];
+}
+function vcGridSlotValue(gridLabel){
+  const phys = vcGridSlotToPhysical(gridLabel, vcRotK, vcFlipS);
+  return vcFlipS ? readPosPhys(vcState, 'back', phys) : readPosPhys(vcState, 'front', phys);
+}
+
+// Composition rules for applying each control on top of the CURRENT (k,s), derived from the D4
+// relation f*z = z^-1*f (f=x2). Verified independently against pure function-composition before
+// being wired in here -- see the conversation's derivation/testing for x2-then-y2 = z2, etc.
+function vcApplyZ(){ [vcRotK, vcFlipS] = vcFlipS===0 ? [(vcRotK+1)%4, 0] : [(vcRotK+3)%4, 1]; }
+function vcApplyZPrime(){ [vcRotK, vcFlipS] = vcFlipS===0 ? [(vcRotK+3)%4, 0] : [(vcRotK+1)%4, 1]; }
+function vcApplyX2(){ vcFlipS = 1 - vcFlipS; }
+function vcApplyY2(){ vcRotK = (vcRotK+2)%4; vcFlipS = 1 - vcFlipS; }
+
+function vcGetPinGroup(physicalCorner){
+  const st = vcPins[physicalCorner];
+  return { state: st, group: VC_CORNERS.filter(c => vcPins[c] === st) };
+}
+// n is always "clockwise as the user currently sees it, dragging on screen right now" -- but
+// applyFrontMove/applyBackMove each expect their amount in a SPECIFIC convention (front-view-CW or
+// back-view-CW respectively). Those only match the raw screen drag when the engaged linkage side
+// (the pin's fixed mechanical state) equals the side currently being viewed; otherwise the sign
+// must flip, since viewing a physical rotation from the opposite side always reverses its apparent
+// direction. This is independent of the pin's rendered up/down badge, which is view-relative.
+function vcTurnCorner(physicalCorner, n){
+  if(n === 0) return;
+  const {state: pinState, group} = vcGetPinGroup(physicalCorner);
+  const engagingFront = (pinState === 'front');
+  const viewingFront = (vcFlipS === 0);
+  const signedN = (engagingFront === viewingFront) ? n : -n;
+  if(engagingFront) applyFrontMove(vcState, group, signedN);
+  else applyBackMove(vcState, group, signedN);
+}
+
+function resetVirtualClockToCurrent(){
+  if(!currentResult) return;
+  vcState = cloneState(currentResult.state);
+  vcPins = { UL:'front', UR:'front', DL:'front', DR:'front' };
+  vcRotK = 0; vcFlipS = 0;
+  vcApplyY2(); // start the view y2 away from the identity orientation, per request
+  renderVirtualClock();
+}
+
+function isVirtualClockSolved(){
+  const s = vcState;
+  return s.fCorner.UL===0 && s.fCorner.UR===0 && s.fCorner.DL===0 && s.fCorner.DR===0 &&
+         s.fEdge.U===0 && s.fEdge.D===0 && s.fEdge.L===0 && s.fEdge.R===0 && s.fC===0 &&
+         s.bEdge.U===0 && s.bEdge.D===0 && s.bEdge.L===0 && s.bEdge.R===0 && s.bC===0;
+}
+
+const vcCells = {}; // gridLabel -> { cellEl, handEl }
+const vcPinEls = {}; // physical-corner-independent: keyed by the GRID CORNER SLOT it's currently drawn at
+
+function vcScreenAngle(dx, dy){
+  return Math.atan2(dx, -dy) * 180 / Math.PI; // 0deg = 12 o'clock, clockwise-positive
+}
+
+function attachDrag(cellEl, gridLabel){
+  let session = null;
+  cellEl.addEventListener('pointerdown', (e) => {
+    if(typeof timerState !== 'undefined' && timerState === 'inspecting') advanceTimer();
+    const rect = cellEl.getBoundingClientRect();
+    const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+    const angle = vcScreenAngle(e.clientX - cx, e.clientY - cy);
+    const phys = vcGridSlotToPhysical(gridLabel, vcRotK, vcFlipS);
+    session = { cx, cy, lastAngle: angle, unwrapped: 0, appliedSteps: 0, physicalCorner: phys };
+    if(cellEl.setPointerCapture) cellEl.setPointerCapture(e.pointerId);
+  });
+  cellEl.addEventListener('pointermove', (e) => {
+    if(!session) return;
+    const angle = vcScreenAngle(e.clientX - session.cx, e.clientY - session.cy);
+    let delta = angle - session.lastAngle;
+    if(delta > 180) delta -= 360;
+    if(delta < -180) delta += 360;
+    session.unwrapped += delta;
+    session.lastAngle = angle;
+    const totalSteps = Math.round(session.unwrapped / 30); // 30deg per hour notch
+    const diff = totalSteps - session.appliedSteps;
+    if(diff !== 0){
+      vcTurnCorner(session.physicalCorner, diff);
+      session.appliedSteps = totalSteps;
+      renderVirtualClock();
+    }
+  });
+  const endDrag = () => { session = null; };
+  cellEl.addEventListener('pointerup', endDrag);
+  cellEl.addEventListener('pointercancel', endDrag);
+}
+
+// Pixel offsets for the 4 inner grid-line intersections, so pins sit in the gaps between dials
+// rather than overlapping a corner dial's face. Matches the CSS: 84px cells, 10px gaps.
+const VC_PIN_OFFSET = { UL:[89,89], UR:[183,89], DL:[89,183], DR:[183,183] };
+
+function buildVirtualClockDOM(){
+  const vcGridEl = document.getElementById('vcGrid');
+  if(!vcGridEl){ console.error('vcGrid element not found \u2014 check index.html matches this script.js'); return; }
+  vcGridEl.innerHTML = '';
+  for(const gridLabel of VC_GRID_ORDER){
+    const cell = document.createElement('div');
+    cell.className = 'vc-cell' + (VC_CORNERS.includes(gridLabel) ? ' corner' : '');
+    const hand = document.createElement('div');
+    hand.className = 'vc-hand';
+    cell.appendChild(hand);
+    const dot = document.createElement('div');
+    dot.className = 'vc-center-dot';
+    cell.appendChild(dot);
+    const marker = document.createElement('div');
+    marker.className = 'vc-marker';
+    cell.appendChild(marker);
+    vcCells[gridLabel] = { cellEl: cell, handEl: hand, markerEl: marker };
+    if(VC_CORNERS.includes(gridLabel)) attachDrag(cell, gridLabel);
+    vcGridEl.appendChild(cell);
+  }
+
+  // Pins are separate elements positioned in the gaps between dials, one per grid-corner-slot
+  // (not tied to a single physical corner, since which physical corner appears there can change
+  // when the view is flipped/rotated -- the pin's own physical target is resolved at render/click time).
+  for(const gridLabel of VC_CORNERS){
+    const pin = document.createElement('div');
+    pin.className = 'vc-pin';
+    const [x, y] = VC_PIN_OFFSET[gridLabel];
+    pin.style.left = x + 'px';
+    pin.style.top = y + 'px';
+    pin.addEventListener('click', (e) => {
+      if(e.stopPropagation) e.stopPropagation();
+      const phys = vcGridSlotToPhysical(gridLabel, vcRotK, vcFlipS);
+      vcPins[phys] = vcPins[phys] === 'front' ? 'back' : 'front';
+      renderVirtualClock();
+    });
+    vcPinEls[gridLabel] = pin;
+    vcGridEl.appendChild(pin);
+  }
+}
+
+function renderVirtualClock(){
+  // Rotating the whole physical clock (z/z') doesn't just remap which dial's VALUE appears at which
+  // grid slot -- every dial's own printed face (including its "12" reference point) physically
+  // rotates along with the whole object. faceAngle captures that: e.g. one z-press means every
+  // dial's own 12 o'clock marking is now 90deg clockwise from straight up.
+  // Verified against a properly-composed (front/back paired) angle tracker across thousands of random
+  // multi-step sequences -- a naive "k*90 + (s?180:0)" formula diverges for odd k when s=1, so this
+  // uses a direct lookup instead of a formula to eliminate that class of error entirely.
+  const FACE_ANGLE_TABLE = { '0,0':0,'1,0':90,'2,0':180,'3,0':270, '0,1':180,'1,1':90,'2,1':0,'3,1':270 };
+  const faceAngle = FACE_ANGLE_TABLE[vcRotK + ',' + vcFlipS];
+  for(const gridLabel of VC_GRID_ORDER){
+    const cellInfo = vcCells[gridLabel];
+    if(!cellInfo) continue;
+    const val = vcGridSlotValue(gridLabel);
+    const handAngle = (val % 12) * 30 + faceAngle;
+    cellInfo.handEl.style.transform = 'rotate(' + handAngle + 'deg)';
+    const rad = faceAngle * Math.PI / 180;
+    const markerRadius = 36;
+    cellInfo.markerEl.style.left = (42 + markerRadius * Math.sin(rad)) + 'px';
+    cellInfo.markerEl.style.top = (42 - markerRadius * Math.cos(rad)) + 'px';
+  }
+  // A pin's mechanical state is fixed (which side it engages), but its VISUAL up/down badge is
+  // relative to the side currently being viewed: a front-engaging pin looks "up" when viewing the
+  // front, but looks "down" from the back (and vice versa) -- flipping the view should visually
+  // invert every pin's apparent state, exactly like a real clock.
+  const viewingFront = (vcFlipS === 0);
+  for(const gridLabel of VC_CORNERS){
+    const pinEl = vcPinEls[gridLabel];
+    if(!pinEl) continue;
+    const phys = vcGridSlotToPhysical(gridLabel, vcRotK, vcFlipS);
+    const mechanicalFront = vcPins[phys] === 'front';
+    const isUp = viewingFront ? mechanicalFront : !mechanicalFront;
+    pinEl.classList.toggle('up', isUp);
+    pinEl.title = 'Pin ' + (isUp ? 'up' : 'down') + ' (click to toggle)';
+  }
+  const viewLabel = document.getElementById('vcViewLabel');
+  if(viewLabel){
+    const sideLabel = vcFlipS ? 'Back' : 'Front';
+    viewLabel.textContent = 'Viewing: ' + sideLabel + (vcRotK ? ' + rotated ' + vcRotK*90 + '\u00b0' : '');
+  }
+}
+
+safeListen('vcFlipX2Btn', 'click', () => { vcApplyX2(); renderVirtualClock(); });
+safeListen('vcFlipY2Btn', 'click', () => { vcApplyY2(); renderVirtualClock(); });
+safeListen('vcZBtn', 'click', () => { vcApplyZ(); renderVirtualClock(); });
+safeListen('vcZPrimeBtn', 'click', () => { vcApplyZPrime(); renderVirtualClock(); });
+
+safeListen('modeScrambleBtn', 'click', () => {
+  appMode = 'scramble';
+  const sBtn = document.getElementById('modeScrambleBtn'), vBtn = document.getElementById('modeVirtualBtn');
+  if(sBtn) sBtn.classList.add('active');
+  if(vBtn) vBtn.classList.remove('active');
+  document.getElementById('drawWrap').style.display = '';
+  document.getElementById('virtualClockWrap').style.display = 'none';
+});
+safeListen('modeVirtualBtn', 'click', () => {
+  appMode = 'virtual';
+  const sBtn = document.getElementById('modeScrambleBtn'), vBtn = document.getElementById('modeVirtualBtn');
+  if(vBtn) vBtn.classList.add('active');
+  if(sBtn) sBtn.classList.remove('active');
+  document.getElementById('drawWrap').style.display = 'none';
+  document.getElementById('virtualClockWrap').style.display = '';
+  resetVirtualClockToCurrent();
+});
+
+buildVirtualClockDOM();
+
+// ============ Inspection + solve timer ============
+// States: 'idle' -> (space/tap) -> 'inspecting' -> (space/tap) -> 'solving' -> (space/tap) -> 'stopped' -> (space/tap) -> 'inspecting' ...
+const timerBox = document.getElementById('timerBox');
+const timerDisplay = document.getElementById('timerDisplay');
+const timerNote = document.getElementById('timerNote');
+
+let timerState = 'idle';
+let phaseStartMs = null;
+let inspectionMs = null;
+let timerIntervalId = null;
+
+function formatSeconds(ms, decimals){
+  return (ms / 1000).toFixed(decimals);
+}
+
+function updateTimerDisplay(){
+  if(timerState === 'inspecting'){
+    const elapsed = performance.now() - phaseStartMs;
+    timerDisplay.textContent = formatSeconds(elapsed, 1) + 's';
+    timerDisplay.className = 'timer-display big inspecting';
+  } else if(timerState === 'solving'){
+    const elapsed = performance.now() - phaseStartMs;
+    timerDisplay.textContent = formatSeconds(elapsed, 2);
+    timerDisplay.className = 'timer-display big solving';
+  }
+}
+
+function startInterval(){
+  if(timerIntervalId) clearInterval(timerIntervalId);
+  timerIntervalId = setInterval(updateTimerDisplay, 30);
+}
+function stopInterval(){
+  if(timerIntervalId){ clearInterval(timerIntervalId); timerIntervalId = null; }
+}
+
+function advanceTimer(){
+  const now = performance.now();
+  if(timerState === 'idle' || timerState === 'stopped'){
+    // start inspection
+    timerState = 'inspecting';
+    phaseStartMs = now;
+    inspectionMs = null;
+    timerNote.textContent = '';
+    startInterval();
+    updateTimerDisplay();
+  } else if(timerState === 'inspecting'){
+    // end inspection, start solve
+    inspectionMs = now - phaseStartMs;
+    timerState = 'solving';
+    phaseStartMs = now;
+    updateTimerDisplay();
+  } else if(timerState === 'solving'){
+    // stop solve, compute result
+    const solveMs = now - phaseStartMs;
+    stopInterval();
+    timerState = 'stopped';
+
+    if(appMode === 'virtual' && !isVirtualClockSolved()){
+      timerDisplay.textContent = 'DNF';
+      timerDisplay.className = 'timer-display big dnf';
+      timerNote.textContent = 'puzzle not solved';
+      recordResult({ value: null, dnf: true, penalty: false, raw: solveMs });
+      generateNewScramble();
+      return;
+    }
+
+    const inspectionSec = inspectionMs / 1000;
+
+    if(inspectionSec >= 17){
+      timerDisplay.textContent = 'DNF';
+      timerDisplay.className = 'timer-display big dnf';
+      timerNote.textContent = 'inspection was ' + formatSeconds(inspectionMs,1) + 's (17s or over \u2014 DNF)';
+      recordResult({ value: null, dnf: true, penalty: false, raw: solveMs });
+    } else if(inspectionSec >= 15){
+      const finalMs = solveMs + 2000;
+      timerDisplay.textContent = formatSeconds(finalMs, 2) + '+';
+      timerDisplay.className = 'timer-display big';
+      timerNote.textContent = '+2s penalty \u2014 inspection was ' + formatSeconds(inspectionMs,1) + 's (15\u201317s)';
+      recordResult({ value: finalMs, dnf: false, penalty: true, raw: solveMs });
+    } else {
+      timerDisplay.textContent = formatSeconds(solveMs, 2);
+      timerDisplay.className = 'timer-display big';
+      timerNote.textContent = 'inspection was ' + formatSeconds(inspectionMs,1) + 's \u2014 no penalty';
+      recordResult({ value: solveMs, dnf: false, penalty: false, raw: solveMs });
+    }
+
+    generateNewScramble();
+  }
+}
+
+safeListen(timerBox, 'click', advanceTimer);
+safeListen(timerBox, 'touchstart', (e) => { e.preventDefault(); advanceTimer(); }, {passive:false});
+
+document.addEventListener('keydown', (e) => {
+  if(e.code === 'Space'){
+    if(e.repeat) return; // ignore key-repeat while held
+    e.preventDefault();
+    advanceTimer();
+  }
+});
+
+// ============ Statistics ============
+let solveResults = []; // chronological: { value: ms|null, dnf, penalty, raw }
+
+function sortVal(r){ return r.dnf ? Infinity : r.value; }
+
+function trimmedAvgOf(window, trimEachSide){
+  const n = window.length;
+  const sorted = window.slice().sort((a,b) => sortVal(a) - sortVal(b));
+  const trimmed = sorted.slice(trimEachSide, n - trimEachSide);
+  if(trimmed.some(r => r.dnf)) return 'DNF';
+  const sum = trimmed.reduce((s,r) => s + r.value, 0);
+  return sum / trimmed.length;
+}
+
+function currentStat(windowSize, trimEachSide){
+  if(solveResults.length < windowSize) return null;
+  return trimmedAvgOf(solveResults.slice(-windowSize), trimEachSide);
+}
+
+function bestStat(windowSize, trimEachSide){
+  let best = null;
+  for(let i=0; i+windowSize<=solveResults.length; i++){
+    const val = trimmedAvgOf(solveResults.slice(i, i+windowSize), trimEachSide);
+    if(val !== 'DNF' && (best===null || val < best)) best = val;
+  }
+  return best;
+}
+
+function currentSingle(){
+  if(solveResults.length===0) return null;
+  const last = solveResults[solveResults.length-1];
+  return last.dnf ? 'DNF' : last.value;
+}
+function bestSingle(){
+  let best = null;
+  for(const r of solveResults) if(!r.dnf && (best===null || r.value < best)) best = r.value;
+  return best;
+}
+
+function fmtStat(v){
+  if(v === null) return '\u2013';
+  if(v === 'DNF') return 'DNF';
+  return (v/1000).toFixed(2);
+}
+
+const STAT_DEFS = [
+  { label:'single', windowSize:1,   trim:0 },
+  { label:'mo3',    windowSize:3,   trim:0 },
+  { label:'ao5',    windowSize:5,   trim:1 },
+  { label:'ao12',   windowSize:12,  trim:1 },
+  { label:'ao25',   windowSize:25,  trim:2 },
+  { label:'ao100',  windowSize:100, trim:5 },
+];
+
+const statsTable = document.getElementById('statsTable');
+const resultsList = document.getElementById('resultsList');
+
+function renderStats(){
+  let html = '<tr><th>stat</th><th>current</th><th>best</th></tr>';
+  for(const def of STAT_DEFS){
+    let cur, best;
+    if(def.label === 'single'){ cur = currentSingle(); best = bestSingle(); }
+    else { cur = currentStat(def.windowSize, def.trim); best = bestStat(def.windowSize, def.trim); }
+    html += `<tr><td class="label">${def.label}</td><td>${fmtStat(cur)}</td><td>${fmtStat(best)}</td></tr>`;
+  }
+  statsTable.innerHTML = html;
+}
+
+function renderResultsList(){
+  if(solveResults.length === 0){
+    resultsList.innerHTML = '<div class="results-empty">No solves yet.</div>';
+    return;
+  }
+  let html = '';
+  for(let i = solveResults.length - 1; i >= 0; i--){
+    const r = solveResults[i];
+    const num = i + 1;
+    if(r.dnf){
+      html += `<div class="result-row dnf"><span><span class="result-num">${num}.</span>DNF</span><span></span></div>`;
+    } else {
+      const penaltyTag = r.penalty ? '<span class="penalty-tag">+2</span>' : '';
+      html += `<div class="result-row"><span><span class="result-num">${num}.</span>${(r.value/1000).toFixed(2)}${penaltyTag}</span><span></span></div>`;
+    }
+  }
+  resultsList.innerHTML = html;
+}
+
+function recordResult(result){
+  solveResults.push(result);
+  dnfUndoInfo = null; // a new solve invalidates any pending undo from a previous DNF-marking
+  try { renderStats(); } catch(err){ console.error('renderStats failed:', err); }
+  try { renderResultsList(); } catch(err){ console.error('renderResultsList failed:', err); }
+  updateDnfButton();
+}
+
+// Marking the last solve as DNF (and undoing that) -- a single level of undo, invalidated by any
+// new solve so it can't be used to retroactively edit older history.
+let dnfUndoInfo = null; // { index, originalEntry } or null
+
+function updateDnfButton(){
+  const btn = document.getElementById('dnfBtn');
+  if(!btn) return;
+  if(dnfUndoInfo){
+    btn.textContent = 'Undo DNF';
+    btn.disabled = false;
+  } else {
+    btn.textContent = 'DNF last solve';
+    btn.disabled = solveResults.length === 0 || solveResults[solveResults.length-1].dnf;
+  }
+}
+
+safeListen('dnfBtn', 'click', () => {
+  if(dnfUndoInfo){
+    solveResults[dnfUndoInfo.index] = dnfUndoInfo.originalEntry;
+    dnfUndoInfo = null;
+  } else {
+    if(solveResults.length === 0) return;
+    const idx = solveResults.length - 1;
+    const entry = solveResults[idx];
+    if(entry.dnf) return;
+    dnfUndoInfo = { index: idx, originalEntry: { ...entry } };
+    solveResults[idx] = { value: null, dnf: true, penalty: false, raw: entry.raw };
+  }
+  try { renderStats(); } catch(err){ console.error('renderStats failed:', err); }
+  try { renderResultsList(); } catch(err){ console.error('renderResultsList failed:', err); }
+  updateDnfButton();
+});
+
+renderStats(); // draw the empty table on load
+updateDnfButton();

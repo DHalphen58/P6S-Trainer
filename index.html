@@ -20,17 +20,54 @@
 
     <button id="genBtn" style="margin-top:14px;">Generate scramble</button>
     <div class="footer-row">
+      <button class="secondary" id="reviewPrevBtn" disabled>Review previous scramble</button>
       <button class="secondary" id="copyBtn">Copy scramble</button>
       <button class="secondary" id="answerBtn">Show answer</button>
     </div>
 
     <div class="answer-box" id="answerBox"></div>
+
+    <div class="review-box" id="reviewBox"></div>
   </div>
 
   <div class="panel">
     <div class="scramble-box" id="scrambleBox">Check some cases, then click "Generate scramble".</div>
     <div class="meta-tag" id="metaTag"></div>
+
+    <div class="mode-row">
+      <button class="secondary mode-btn active" id="modeScrambleBtn">Diagram</button>
+      <button class="secondary mode-btn" id="modeVirtualBtn">Virtual clock</button>
+    </div>
+
     <div class="draw-wrap" id="drawWrap"></div>
+
+    <div class="virtual-clock-wrap" id="virtualClockWrap" style="display:none;">
+      <div class="vc-controls">
+        <button class="secondary" id="vcFlipX2Btn">x2</button>
+        <button class="secondary" id="vcFlipY2Btn">y2</button>
+        <button class="secondary" id="vcZBtn">z</button>
+        <button class="secondary" id="vcZPrimeBtn">z'</button>
+        <span class="vc-view-label" id="vcViewLabel">Viewing: Front</span>
+      </div>
+      <div class="vc-grid" id="vcGrid"></div>
+      <div class="vc-hint">Drag a corner dial to turn it. Click a corner's pin toggle to flip that pin up/down.</div>
+    </div>
+
+    <div class="timer-box" id="timerBox" tabindex="0">
+      <div class="timer-display" id="timerDisplay">Press space or tap here to start inspection</div>
+      <div class="timer-note" id="timerNote"></div>
+    </div>
+
+    <div class="stats-panel">
+      <h3>Statistics</h3>
+      <table class="stats-table" id="statsTable"></table>
+    </div>
+
+    <div class="results-panel">
+      <h3>Results</h3>
+      <div class="results-list" id="resultsList"><div class="results-empty">No solves yet.</div></div>
+      <button class="secondary" id="dnfBtn" style="margin-top:10px;" disabled>DNF last solve</button>
+    </div>
   </div>
 </div>
 <script src="script.js"></script>
