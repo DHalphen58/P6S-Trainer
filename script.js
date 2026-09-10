@@ -630,7 +630,14 @@ function buildVirtualClockDOM(){
     const marker = document.createElement('div');
     marker.className = 'vc-marker';
     cell.appendChild(marker);
-    vcCells[gridLabel] = { cellEl: cell, handEl: hand, markerEl: marker };
+    const tickEls = [];
+    for(let i = 0; i < 11; i++){
+      const tick = document.createElement('div');
+      tick.className = 'vc-tick';
+      cell.appendChild(tick);
+      tickEls.push(tick);
+    }
+    vcCells[gridLabel] = { cellEl: cell, handEl: hand, markerEl: marker, tickEls };
     if(VC_CORNERS.includes(gridLabel)) attachDrag(cell, gridLabel);
     vcGridEl.appendChild(cell);
   }
@@ -675,6 +682,11 @@ function renderVirtualClock(){
     const markerRadius = 36;
     cellInfo.markerEl.style.left = (42 + markerRadius * Math.sin(rad)) + 'px';
     cellInfo.markerEl.style.top = (42 - markerRadius * Math.cos(rad)) + 'px';
+    for(let i = 0; i < 11; i++){
+      const tickRad = (faceAngle + (i+1)*30) * Math.PI / 180;
+      cellInfo.tickEls[i].style.left = (42 + markerRadius * Math.sin(tickRad)) + 'px';
+      cellInfo.tickEls[i].style.top = (42 - markerRadius * Math.cos(tickRad)) + 'px';
+    }
   }
   // A pin's mechanical state is fixed (which side it engages), but its VISUAL up/down badge is
   // relative to the side currently being viewed: a front-engaging pin looks "up" when viewing the
@@ -881,23 +893,44 @@ const STAT_DEFS = [
 
 const statsTable = document.getElementById('statsTable');
 const resultsList = document.getElementById('resultsList');
-let statsFilterCase = 'all'; // 'all' or a specific case name
+let statsFilterCase = 'all'; // 'all', 'group:<title>', or a specific case name
 
 (function populateStatsFilterOptions(){
   const sel = document.getElementById('statsFilterSelect');
   if(!sel) return;
+
+  const groupOptGroup = document.createElement('optgroup');
+  groupOptGroup.label = 'Aggregate by group';
+  for(const group of CASE_GROUPS){
+    const opt = document.createElement('option');
+    opt.value = 'group:' + group.title;
+    opt.textContent = group.title;
+    groupOptGroup.appendChild(opt);
+  }
+  sel.appendChild(groupOptGroup);
+
+  const caseOptGroup = document.createElement('optgroup');
+  caseOptGroup.label = 'Individual cases';
   for(const group of CASE_GROUPS){
     for(const c of group.cases){
       const opt = document.createElement('option');
       opt.value = c.name;
       opt.textContent = c.name;
-      sel.appendChild(opt);
+      caseOptGroup.appendChild(opt);
     }
   }
+  sel.appendChild(caseOptGroup);
 })();
 
 function getFilteredResults(){
   if(statsFilterCase === 'all') return solveResults;
+  if(statsFilterCase.startsWith('group:')){
+    const groupTitle = statsFilterCase.slice('group:'.length);
+    const group = CASE_GROUPS.find(g => g.title === groupTitle);
+    if(!group) return [];
+    const namesInGroup = new Set(group.cases.map(c => c.name));
+    return solveResults.filter(r => namesInGroup.has(r.caseName));
+  }
   return solveResults.filter(r => r.caseName === statsFilterCase);
 }
 
